@@ -15,7 +15,7 @@ struct WeatherButtonView : View {
     
     var body : some View {
         Text(buttonLabel)
-            .frame(width: 280, height: 50)
+            .frame(width: 180, height: 50)
             .background(backgroundColor)
             .foregroundStyle(textColor)
             .font(.system(size: 20, weight: .bold, design: .default))

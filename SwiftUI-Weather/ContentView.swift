@@ -6,127 +6,205 @@
 //
 
 import SwiftUI
+import Combine
 
-struct ContentView: View {
-    
-    @State private var isNightMode = false
-    
-    enum WeekDay: CaseIterable {
-        case tue, wed, thu, fri, sat
+enum City: CaseIterable, Identifiable {
 
-        var title: String {
-            switch self {
-            case .tue: return "TUE"
-            case .wed: return "WED"
-            case .thu: return "THU"
-            case .fri: return "FRI"
-            case .sat: return "SAT"
-            }
-        }
+    case muzaffarpur
+    case delhi
+    case mumbai
+    case bhubaneshwar
 
-        var temperature: Int {
-            switch self {
-            case .tue: return 79
-            case .wed: return 59
-            case .thu: return 89
-            case .fri: return 29
-            case .sat: return 19
-            }
-        }
+    var id: String { name }
 
-        var icon: String {
-            switch self {
-            case .tue: return "cloud.sun.fill"
-            case .wed: return "cloud.rain.fill"
-            case .thu: return "cloud.bolt.rain.fill"
-            case .fri: return "cloud.sun.rain.fill"
-            case .sat: return "snowflake"
-            }
+    var name: String {
+        switch self {
+        case .muzaffarpur: return "Muzaffarpur"
+        case .delhi: return "Delhi"
+        case .mumbai: return "Mumbai"
+        case .bhubaneshwar: return "Bhubaneswar"
         }
     }
 
-    
+    var latitude: Double {
+        switch self {
+        case .muzaffarpur: return 26.1197
+        case .delhi: return 28.6139
+        case .mumbai: return 19.0760
+        case .bhubaneshwar: return 20.2961
+        }
+    }
+
+    var longitude: Double {
+        switch self {
+        case .muzaffarpur: return 85.3910
+        case .delhi: return 77.2090
+        case .mumbai: return 72.8777
+        case .bhubaneshwar: return 85.8245
+        }
+    }
+}
+
+
+struct WeatherResponse: Decodable {
+    let main: Main
+    let weather: [Weather]
+}
+
+struct Main: Decodable {
+    let temp: Double
+}
+
+struct Weather: Decodable {
+    let icon: String
+}
+
+struct ForecastResponse: Decodable {
+    let list: [ForecastItem]
+}
+
+struct ForecastItem: Decodable, Identifiable {
+    let dt: TimeInterval
+    let main: Main
+    let weather: [Weather]
+
+    var id: TimeInterval { dt }
+}
+
+
+class WeatherViewModel: ObservableObject {
+
+    @Published var cityName: String = "City"
+    @Published var temperature: Int = 0
+    @Published var icon: String = "cloud.sun.fill"
+    @Published var forecast: [ForecastItem] = []
+
+
+    func fetchWeather(for city: City) {
+
+        let apiKey = "Enter_your_Open_Weather_API_key_here"
+
+        
+        // -------- today 's forecast ----------
+        let urlString =
+        "https://api.openweathermap.org/data/2.5/weather?lat=\(city.latitude)&lon=\(city.longitude)&units=metric&appid=\(apiKey)"
+
+        guard let url = URL(string: urlString) else { return }
+
+        URLSession.shared.dataTask(with: url) { data, _, _ in
+
+            guard let data else { return }
+
+            let decoded = try? JSONDecoder().decode(WeatherResponse.self, from: data)
+
+            guard let decoded else { return }
+
+            Task { @MainActor in
+                self.cityName = city.name
+                self.temperature = Int(decoded.main.temp)
+                self.icon = self.mapIcon(decoded.weather.first?.icon ?? "")
+            }
+
+        }.resume()
+        
+        // -------- next 5 day 's forecast ----------
+        let forecastUrl =
+        "https://api.openweathermap.org/data/2.5/forecast?lat=\(city.latitude)&lon=\(city.longitude)&units=metric&appid=\(apiKey)"
+
+        guard let forecastURL = URL(string: forecastUrl) else { return }
+
+        URLSession.shared.dataTask(with: forecastURL) { data, _, _ in
+            guard let data else { return }
+            let decoded = try? JSONDecoder().decode(ForecastResponse.self, from: data)
+            guard let decoded else { return }
+
+            let grouped = Dictionary(grouping: decoded.list) { item in
+                Calendar.current.startOfDay(
+                    for: Date(timeIntervalSince1970: item.dt)
+                )
+            }
+
+            let daily = grouped
+                .sorted { $0.key < $1.key }
+                .dropFirst()
+                .prefix(5)
+                .map { $0.value.first! }
+
+            Task { @MainActor in
+                self.forecast = daily
+            }
+        }.resume()
+    }
+
+     func mapIcon(_ code: String) -> String {
+        switch code {
+        case "01d": return "sun.max.fill"
+        case "01n": return "moon.stars.fill"
+        case "02d": return "cloud.sun.fill"
+        case "09d", "10d": return "cloud.rain.fill"
+        case "11d": return "cloud.bolt.fill"
+        case "13d": return "snow"
+        default: return "cloud.fill"
+        }
+    }
+}
+
+
+struct ContentView: View {
+
+    @State private var selectedCity: City = .muzaffarpur
+    @State private var showCityPicker = false
+    @State private var isNightMode = false
+
+    @StateObject private var weatherVM = WeatherViewModel()
+
     var body: some View {
-        ZStack{
+        ZStack {
             BackgroundView(isNight: $isNightMode, topColor: .blue, bottomColor: Color("lightBlue"))
-            
-            VStack{
-                CityNameView(cityName: "Muzaffarpur")
+
+            VStack(spacing: 20) {
+
+                MenuView(selectedCity: $selectedCity, weatherVM: weatherVM)
+
+                Image(systemName: weatherVM.icon)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 150, height: 150)
+                    .foregroundColor(.white)
+
+                Text("\(weatherVM.temperature)°C")
+                    .font(.system(size: 60, weight: .bold))
+                    .foregroundColor(.white)
+
+                Spacer()
                 
-                MainWeatherStatusView(imageName:isNightMode ? "moon.stars.fill" : "cloud.sun.fill", temp: 70)
+                ForecastRowView(weatherVM:  weatherVM)
                 
                 Spacer()
                 
-                HStack(spacing:20){
-                    HStack(spacing: 20) {
-                        ForEach(WeekDay.allCases, id: \.self) { day in
-                            WeatherDayView(
-                                dayOfWeek: day.title,
-                                temperature: day.temperature,
-                                weatherIcon: day.icon
-                            )
-                        }
-                    }
-                }
-                
-                Spacer()
                 Button{
                     print("clicked")
                     isNightMode.toggle()
                 }label: {
-                    WeatherButtonView(buttonLabel: "Change Day Time", textColor: .blue, backgroundColor: .white)
+                    WeatherButtonView(buttonLabel: isNightMode ? "Day Mode" : "Night Mode", textColor: .blue, backgroundColor: .white)
                 }
                 Spacer()
             }
-            
         }
-//        HStack{
-//            Text("the placeholder text")
-//            VStack {
-//                Image(systemName: "globe")
-//                    .imageScale(.large)
-//                    .foregroundStyle(.tint)
-//                Text("are are are.. hosh me madhaw..!")
-//                Button("hello") {
-//                    print("hi")
-//                }
-//            }
-//            .padding()
-//        }
-    }
-}
-
-struct WeatherDayView : View {
-    var dayOfWeek : String
-    var temperature : Int
-    var weatherIcon : String
-    
-    var body: some View {
-        VStack{
-            Text(dayOfWeek)
-                .font(.system(size: 16, weight: .medium, design: .default))
-                .foregroundStyle(Color(.white))
-            
-            Image(systemName: weatherIcon)
-                .renderingMode(.original)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 40, height: 40)
-            
-            Text("\(temperature)°")
-                .font(.system(size: 28, weight: .medium, design: .default))
-                .foregroundStyle(Color(.white))
+        .onAppear {
+            // initial API call
+            weatherVM.fetchWeather(for: selectedCity)
         }
     }
 }
 
 struct BackgroundView : View {
-    
+
     @Binding var isNight : Bool
-    
+
     var topColor : Color
     var bottomColor : Color
-    
+
     var body: some View {
         LinearGradient(colors: [isNight ? .black : topColor, isNight ? .gray : bottomColor],
                            startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -134,37 +212,64 @@ struct BackgroundView : View {
     }
 }
 
-struct CityNameView : View {
-    var cityName : String
+struct MenuView : View {
+    
+    @Binding var selectedCity: City
+    @ObservedObject var weatherVM: WeatherViewModel
+    
     var body : some View {
-        Text(cityName)
-            .font(.system(size: 32, weight: .bold, design: .default))
-            .foregroundStyle(Color(.white))
-            .padding()
-    }
-}
+        Menu {
+            ForEach(City.allCases) { city in
+                Button {
+                    selectedCity = city
+                    weatherVM.fetchWeather(for: city)
+                } label: {
+                    Text(city.name)
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(weatherVM.cityName.isEmpty ? selectedCity.name : weatherVM.cityName)
+                    .font(.largeTitle)
+                    .foregroundColor(.white)
 
-struct MainWeatherStatusView : View {
-    
-    var imageName : String
-    var temp : Int
-    
-    var body : some View {
-        VStack(spacing: 5){
-            Image(systemName: imageName)
-                .renderingMode(.original)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 200, height: 200)
-            
-            Text("\(temp)°")
-                .font(.system(size: 70, weight: .bold, design: .default))
-                .foregroundStyle(Color(.white))
+                Image(systemName: "chevron.down")
+                    .font(.headline)
+                    .foregroundColor(.white)
+            }
         }
     }
 }
 
+struct ForecastRowView: View {
+
+    @ObservedObject var weatherVM: WeatherViewModel
+
+    var body: some View {
+        HStack(spacing: 25) {
+            ForEach(weatherVM.forecast) { day in
+                VStack(spacing:10) {
+                    Text(
+                        Date(timeIntervalSince1970: day.dt),
+                        format: .dateTime.weekday(.abbreviated)
+                    )
+
+                    Image(systemName: weatherVM.mapIcon(day.weather.first?.icon ?? ""))
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 25, height: 25)
+                        .foregroundColor(.white)
+
+                    Text("\(Int(day.main.temp))°C")
+                        .foregroundColor(.white)
+                        .font(.system(size: 20, weight: .medium, design: .default))
+                }
+            }
+        }
+    }
+}
+
+
 #Preview {
     ContentView()
 }
- 
