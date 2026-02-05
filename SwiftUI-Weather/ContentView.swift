@@ -160,7 +160,7 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            BackgroundView(isNight: $isNightMode, topColor: .blue, bottomColor: Color("lightBlue"))
+            BackgroundView(isNight: isNightMode, topColor: .blue, bottomColor: Color("lightBlue"))
 
             VStack(spacing: 20) {
 
@@ -200,7 +200,7 @@ struct ContentView: View {
 
 struct BackgroundView : View {
 
-    @Binding var isNight : Bool
+    var isNight : Bool
 
     var topColor : Color
     var bottomColor : Color
@@ -256,6 +256,7 @@ struct ForecastRowView: View {
 
                     Image(systemName: weatherVM.mapIcon(day.weather.first?.icon ?? ""))
                         .resizable()
+                        .symbolRenderingMode(.multicolor)
                         .scaledToFit()
                         .frame(width: 25, height: 25)
                         .foregroundColor(.white)
